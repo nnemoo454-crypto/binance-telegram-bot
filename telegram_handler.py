@@ -2,7 +2,7 @@ import logging
 import asyncio
 from datetime import datetime
 import pytz
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatAction
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -62,7 +62,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
-        "🎯 <b>Trading System</b>\n\n"
+        "🏧 <b>Trading System</b>\n\n"
         "Система управления блоками сделок\n\n"
         "Выберите действие:",
         reply_markup=reply_markup,
@@ -195,7 +195,7 @@ async def stats_handler(query):
              f"✅ Побед: {stats.winning_blocks}\n"
              f"❌ Поражений: {stats.losing_blocks}\n"
              f"📊 Winrate: {winrate:.1f}%\n"
-             f"📍 Позиций: {stats.total_positions}",
+             f"📋 Позиций: {stats.total_positions}",
         parse_mode='HTML'
     )
 
