@@ -1,5 +1,5 @@
 from binance.client import Client
-from binance.exceptions import BinanceAPIException
+from binance.exceptions import BinanceAPIException, BinanceOrderException
 from config import BINANCE_API_KEY, BINANCE_SECRET_KEY
 import logging
 
@@ -8,73 +8,118 @@ logger = logging.getLogger(__name__)
 client = Client(BINANCE_API_KEY, BINANCE_SECRET_KEY)
 
 
+def get_open_positions():
+    """Get all open positions from Binance Futures"""
+    try:
+        account = client.futures_account()
+        positions = []
+        for position in account['positions']:
+            if float(position['positionAmt']) != 0:
+                positions.append({
+                    'symbol': position['symbol'],
+                    'positionAmt': float(position['positionAmt']),
+                    'entryPrice': float(position['entryPrice']),
+                    'markPrice': float(position['markPrice']),
+                    'unRealizedProfit': float(position['unRealizedProfit']),
+                    'percentage': float(position['percentage'])
+                })
+        return positions
+    except BinanceAPIException as e:
+        logger.error(f"Error getting positions: {e}")
+        return []
+
+
 def get_current_price(symbol):
     """Get current market price"""
     try:
-        ticker = client.get_symbol_ticker(symbol=symbol)
+        ticker = client.futures_symbol_ticker(symbol=symbol)
         return float(ticker['price'])
     except BinanceAPIException as e:
         logger.error(f"Error getting price for {symbol}: {e}")
         return None
 
 
-def get_order_status(symbol, order_id):
-    """Get order status"""
+def close_position(symbol, quantity):
+    """Close position"""
     try:
-        order = client.get_order(symbol=symbol, orderId=order_id)
-        return {
-            'status': order['status'],
-            'filled_qty': float(order['executedQty']),
-            'orig_qty': float(order['origQty'])
-        }
-    except BinanceAPIException as e:
-        logger.error(f"Error getting order {order_id}: {e}")
+        # Get current position to determine side
+        account = client.futures_account()
+        for pos in account['positions']:
+            if pos['symbol'] == symbol:
+                position_amt = float(pos['positionAmt'])
+                if position_amt > 0:
+                    # Long position, sell to close
+                    order = client.futures_create_order(
+                        symbol=symbol,
+                        side='SELL',
+                        type='MARKET',
+                        quantity=abs(quantity)
+                    )
+                else:
+                    # Short position, buy to close
+                    order = client.futures_create_order(
+                        symbol=symbol,
+                        side='BUY',
+                        type='MARKET',
+                        quantity=abs(quantity)
+                    )
+                logger.info(f"Closed position {symbol}: {order}")
+                return order
+        return None
+    except BinanceOrderException as e:
+        logger.error(f"Error closing position {symbol}: {e}")
         return None
 
 
-def cancel_order(symbol, order_id):
-    """Cancel order"""
+def close_all_positions_by_symbols(symbols):
+    """Close all positions for given symbols"""
+    results = {}
+    for symbol in symbols:
+        result = close_position(symbol, None)
+        results[symbol] = result
+    return results
+
+
+def get_position_info(symbol):
+    """Get detailed position info"""
     try:
-        result = client.cancel_order(symbol=symbol, orderId=order_id)
-        logger.info(f"Cancelled order {order_id} for {symbol}")
-        return result
-    except BinanceAPIException as e:
-        logger.error(f"Error cancelling order {order_id}: {e}")
-        return None
-
-
-def place_market_order(symbol, side, quantity):
-    """Place market order to close position"""
-    try:
-        order = client.order_market(symbol=symbol, side=side, quantity=quantity)
-        logger.info(f"Placed market order: {side} {quantity} {symbol}")
-        return order
-    except BinanceAPIException as e:
-        logger.error(f"Error placing market order: {e}")
-        return None
-
-
-def get_open_orders(symbol):
-    """Get all open orders for symbol"""
-    try:
-        orders = client.get_open_orders(symbol=symbol)
-        return orders
-    except BinanceAPIException as e:
-        logger.error(f"Error getting open orders for {symbol}: {e}")
-        return []
-
-
-def get_account_balance(asset):
-    """Get account balance for asset"""
-    try:
-        account = client.get_account()
-        for balance in account['balances']:
-            if balance['asset'] == asset:
+        account = client.futures_account()
+        for pos in account['positions']:
+            if pos['symbol'] == symbol:
                 return {
-                    'free': float(balance['free']),
-                    'locked': float(balance['locked'])
+                    'symbol': symbol,
+                    'positionAmt': float(pos['positionAmt']),
+                    'entryPrice': float(pos['entryPrice']),
+                    'markPrice': float(pos['markPrice']),
+                    'unRealizedProfit': float(pos['unRealizedProfit']),
+                    'percentage': float(pos['percentage']),
+                    'side': 'LONG' if float(pos['positionAmt']) > 0 else 'SHORT'
                 }
         return None
     except BinanceAPIException as e:
-        logger.error(f"Error getting balance for {asset}: {e}")
+        logger.error(f"Error getting position info: {e}")
+        return None
+
+
+def set_stop_loss(symbol, stop_price, quantity):
+    """Set stop loss order"""
+    try:
+        account = client.futures_account()
+        for pos in account['positions']:
+            if pos['symbol'] == symbol:
+                position_amt = float(pos['positionAmt'])
+                side = 'SELL' if position_amt > 0 else 'BUY'
+                
+                order = client.futures_create_order(
+                    symbol=symbol,
+                    side=side,
+                    type='STOP_MARKET',
+                    stopPrice=stop_price,
+                    quantity=abs(quantity)
+                )
+                logger.info(f"Set stop loss for {symbol} at {stop_price}")
+                return order
+        return None
+    except BinanceOrderException as e:
+        logger.error(f"Error setting stop loss: {e}")
         return None
